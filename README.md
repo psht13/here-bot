@@ -4,6 +4,7 @@ Telegram does not allow bots to implement a literal Slack-style `@here` trigger,
 
 - `/here` inside a group or supergroup mentions every tracked member.
 - Custom mention groups such as `@gang` are managed with bot commands, then triggered with `/tag gang`.
+- `/manage` opens a button-based dashboard for browsing members, opening subgroups, and building subgroup drafts.
 - Inline mode works too, but it needs an explicit workspace key:
   - `@YourBot all <workspace-key>`
   - `@YourBot tag <workspace-key> <group-name>`
@@ -30,7 +31,9 @@ The bot stores only the members it has actually seen. Telegram bots cannot fetch
 - `src/index.ts`: bot entrypoint, commands, inline handlers.
 - `src/storage.ts`: JSON-backed persistence for groups, members, and custom tags.
 - `src/domain.ts`: parsing, mention formatting, and shared helpers.
+- `src/manager.ts`: button UI, callback parsing, and subgroup draft state.
 - `src/domain.test.ts`: small regression tests for the pure logic.
+- `src/manager.test.ts`: regression tests for callback parsing and subgroup drafts.
 
 ## Setup
 
@@ -82,6 +85,20 @@ Inside the group:
 /here
 ```
 
+Button dashboard:
+
+```text
+/manage
+```
+
+The dashboard lets you:
+
+- tap `Ping All` instead of typing `/here`
+- tap `Inline Here` to inject the full inline query for the current group
+- browse tracked members
+- open existing subgroups
+- build a subgroup by tapping members
+
 Inline mode in any chat input:
 
 ```text
@@ -119,6 +136,26 @@ Ping the custom group:
 ```text
 /tag gang
 ```
+
+Button-driven creation:
+
+1. Run `/manage`
+2. Tap `New Subgroup`
+3. Tap members to select them
+4. Tap `Name + Save`
+5. Send:
+
+```text
+/tagname gang
+```
+
+Editing an existing subgroup:
+
+1. Run `/manage`
+2. Tap `Groups`
+3. Open a subgroup
+4. Tap `Edit Members`
+5. Toggle members and tap `Save @group`
 
 List groups:
 
