@@ -18,6 +18,7 @@ export interface DraftState {
   memberIds: number[];
   page: number;
   groupKey?: string | undefined;
+  awaitingName: boolean;
   updatedAt: number;
 }
 
@@ -201,6 +202,7 @@ export class DraftRegistry {
       memberIds: [...new Set(memberIds)],
       page: 0,
       groupKey,
+      awaitingName: false,
       updatedAt: Date.now(),
     };
 
@@ -265,6 +267,20 @@ export class DraftRegistry {
     }
 
     draft.groupKey = normalized;
+    draft.awaitingName = false;
+    draft.updatedAt = Date.now();
+
+    return draft;
+  }
+
+  promptForName(chatId: number, userId: number): DraftState | null {
+    const draft = this.get(chatId, userId);
+
+    if (!draft) {
+      return null;
+    }
+
+    draft.awaitingName = true;
     draft.updatedAt = Date.now();
 
     return draft;
@@ -549,7 +565,14 @@ export function buildDraftScreen(
   );
 
   keyboard
-    .text(draft.groupKey ? `Save @${draft.groupKey}` : "Name + Save", managerCallbacks.draftSave(chat.id))
+    .text(
+      draft.groupKey
+        ? `Save @${draft.groupKey}`
+        : draft.awaitingName
+          ? "Waiting For Name"
+          : "Name + Save",
+      managerCallbacks.draftSave(chat.id),
+    )
     .text("Cancel", managerCallbacks.draftCancel(chat.id))
     .row()
     .text("Home", managerCallbacks.home(chat.id));
@@ -562,19 +585,18 @@ export function buildDraftScreen(
     `Selected members: <b>${selectedMembers.length}</b> of <b>${allMembers.length}</b>`,
     `Page ${safePage + 1}/${totalPages}`,
     "",
-    "Tap members below to toggle them.",
+    allMembers.length > 0
+      ? "Tap members below to toggle them."
+      : "No tracked members are available yet. Ask people to send one message in this group.",
     draft.groupKey
       ? "Press Save to update this subgroup."
-      : "Press Name + Save, then send /tagname <name> in the group.",
+      : draft.awaitingName
+        ? "Send the subgroup name as your next message in this group."
+        : "Press Name + Save to enter naming mode.",
     "",
     "Currently selected:",
     ...selectedPreview(selectedMembers),
   ];
-
-  if (slice.length === 0) {
-    lines.push("", "No tracked members are available yet.");
-  }
-
   return {
     text: lines.join("\n"),
     keyboard,

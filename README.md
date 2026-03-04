@@ -161,7 +161,13 @@ Button-driven creation:
 2. Tap `New Subgroup`
 3. Tap members to select them
 4. Tap `Name + Save`
-5. Send:
+5. Send the subgroup name as your next normal message in the group, for example:
+
+```text
+gang
+```
+
+Fallback command if you prefer:
 
 ```text
 /tagname gang

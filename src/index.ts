@@ -150,6 +150,17 @@ async function editManagerScreen(ctx: Context, screen: ManagerScreen): Promise<v
       return;
     }
 
+    if (
+      error instanceof GrammyError &&
+      (
+        error.description.includes("message can't be edited") ||
+        error.description.includes("message to edit not found")
+      )
+    ) {
+      await replyManagerScreen(ctx, screen);
+      return;
+    }
+
     throw error;
   }
 }
@@ -176,6 +187,63 @@ function getDraftOwnerId(ctx: Context): number | null {
   return ctx.from.id;
 }
 
+async function saveDraftAsGroup(
+  ctx: Context,
+  chatId: number,
+  ownerId: number,
+  rawGroupName: string,
+): Promise<{ ok: true } | { ok: false }> {
+  const normalizedTag = normalizeKey(rawGroupName.startsWith("@") ? rawGroupName.slice(1) : rawGroupName);
+
+  if (!normalizedTag) {
+    await ctx.reply(
+      "Invalid subgroup name. Use 2-32 characters: letters, numbers, _ or -.",
+    );
+    return { ok: false };
+  }
+
+  const draft = drafts.get(chatId, ownerId);
+
+  if (!draft) {
+    await ctx.reply("No active subgroup draft. Start one with /manage.");
+    return { ok: false };
+  }
+
+  if (draft.memberIds.length === 0) {
+    await ctx.reply("Select at least one member before saving.");
+    return { ok: false };
+  }
+
+  drafts.setGroupKey(chatId, ownerId, normalizedTag);
+  const saved = await store.upsertGroup(chatId, normalizedTag, draft.memberIds);
+
+  if (!saved) {
+    await ctx.reply("That subgroup name is invalid.");
+    return { ok: false };
+  }
+
+  drafts.clear(chatId, ownerId);
+  const registered = store.getChat(chatId);
+  const savedGroup = store.getGroup(chatId, saved);
+
+  if (!registered || !savedGroup) {
+    await ctx.reply(`Saved @${saved}.`);
+    return { ok: true };
+  }
+
+  await replyManagerScreen(
+    ctx,
+    buildGroupScreen(
+      registered,
+      savedGroup,
+      store.getGroupMembers(chatId, saved),
+      0,
+    ),
+  );
+
+  return { ok: true };
+}
+
 function resolveSelectedMembers(ctx: Context, chatId: number, refs: string[]) {
   const knownMembers = store.getMembers(chatId);
   const extraIds: number[] = [];
@@ -196,6 +264,40 @@ function resolveSelectedMembers(ctx: Context, chatId: number, refs: string[]) {
 
   return resolveMemberRefs(knownMembers, filteredRefs, extraIds);
 }
+
+bot.use(async (ctx, next) => {
+  if (isSupportedGroupChat(ctx.chat) && ctx.msg) {
+    await store.ensureChat(ctx.chat);
+
+    if (ctx.from && !ctx.from.is_bot) {
+      await store.upsertMember(ctx.chat, ctx.from);
+
+      const draft = drafts.get(ctx.chat.id, ctx.from.id);
+      const messageText = "text" in ctx.msg && typeof ctx.msg.text === "string"
+        ? ctx.msg.text.trim()
+        : "";
+
+      if (draft?.awaitingName && messageText && !messageText.startsWith("/")) {
+        await saveDraftAsGroup(ctx, ctx.chat.id, ctx.from.id, messageText);
+        return;
+      }
+    }
+
+    const replyAuthor = ctx.msg.reply_to_message?.from;
+
+    if (replyAuthor && !replyAuthor.is_bot) {
+      await store.upsertMember(ctx.chat, replyAuthor);
+    }
+
+    const newMembers = ctx.msg.new_chat_members ?? [];
+
+    for (const member of newMembers) {
+      await store.upsertMember(ctx.chat, member);
+    }
+  }
+
+  await next();
+});
 
 function buildInlineHelpResult(): InlineQueryShape {
   return {
@@ -627,76 +729,14 @@ bot.command("tagname", async (ctx) => {
 
   await store.ensureChat(chat);
 
-  const draft = drafts.get(chat.id, ownerId);
-
-  if (!draft) {
-    await ctx.reply("No active subgroup draft. Start one with /manage.");
-    return;
-  }
-
   const [groupName] = parseArgs(getMatchText(ctx.match));
-  const normalizedTag = groupName ? normalizeKey(groupName) : null;
-
-  if (!normalizedTag) {
+  
+  if (!groupName) {
     await ctx.reply("Usage: /tagname <group-name>");
     return;
   }
 
-  if (draft.memberIds.length === 0) {
-    await ctx.reply("Select at least one member before saving.");
-    return;
-  }
-
-  drafts.setGroupKey(chat.id, ownerId, normalizedTag);
-  const saved = await store.upsertGroup(chat.id, normalizedTag, draft.memberIds);
-
-  if (!saved) {
-    await ctx.reply("That subgroup name is invalid.");
-    return;
-  }
-
-  drafts.clear(chat.id, ownerId);
-  const registered = store.getChat(chat.id);
-  const savedGroup = store.getGroup(chat.id, saved);
-
-  if (!registered || !savedGroup) {
-    await ctx.reply(`Saved @${saved}.`);
-    return;
-  }
-
-  await replyManagerScreen(
-    ctx,
-    buildGroupScreen(
-      registered,
-      savedGroup,
-      store.getGroupMembers(chat.id, saved),
-      0,
-    ),
-  );
-});
-
-bot.on("message", async (ctx) => {
-  if (!isSupportedGroupChat(ctx.chat)) {
-    return;
-  }
-
-  await store.ensureChat(ctx.chat);
-
-  if (ctx.from && !ctx.from.is_bot) {
-    await store.upsertMember(ctx.chat, ctx.from);
-  }
-
-  const replyAuthor = ctx.msg?.reply_to_message?.from;
-
-  if (replyAuthor && !replyAuthor.is_bot) {
-    await store.upsertMember(ctx.chat, replyAuthor);
-  }
-
-  const newMembers = ctx.msg?.new_chat_members ?? [];
-
-  for (const member of newMembers) {
-    await store.upsertMember(ctx.chat, member);
-  }
+  await saveDraftAsGroup(ctx, chat.id, ownerId, groupName);
 });
 
 bot.on("chat_member", async (ctx) => {
@@ -1065,15 +1105,6 @@ bot.on("callback_query:data", async (ctx) => {
 
   if (action.kind === "draftNew") {
     const members = store.getMembers(action.chatId);
-
-    if (members.length === 0) {
-      await ctx.answerCallbackQuery({
-        text: "No tracked members yet. Ask people to send one message first.",
-        show_alert: true,
-      });
-      return;
-    }
-
     const draft = drafts.create(action.chatId, ownerId);
 
     await ctx.answerCallbackQuery();
@@ -1172,10 +1203,24 @@ bot.on("callback_query:data", async (ctx) => {
     }
 
     if (!draft.groupKey) {
+      const promptedDraft = drafts.promptForName(action.chatId, ownerId);
+
+      if (!promptedDraft) {
+        await ctx.answerCallbackQuery({
+          text: "That draft expired. Start again from New Subgroup.",
+          show_alert: true,
+        });
+        return;
+      }
+
       await ctx.answerCallbackQuery({
-        text: "Send /tagname <group-name> in this group to save the current selection.",
+        text: "Send the subgroup name as your next message in this group.",
         show_alert: true,
       });
+      await editManagerScreen(
+        ctx,
+        buildDraftScreen(registered, promptedDraft, store.getMembers(action.chatId)),
+      );
       return;
     }
 
