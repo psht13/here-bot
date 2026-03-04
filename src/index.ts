@@ -18,7 +18,7 @@ import {
   parseManagerAction,
   type ManagerScreen,
 } from "./manager.js";
-import type { KnownMember } from "./models.js";
+import type { KnownChat, KnownMember } from "./models.js";
 import { JsonStore } from "./storage.js";
 
 const envSchema = z.object({
@@ -34,6 +34,7 @@ const env = envSchema.parse(process.env);
 const store = new JsonStore(env.DATA_FILE);
 const drafts = new DraftRegistry();
 const bot = new Bot(env.BOT_TOKEN);
+const INLINE_RESULT_LIMIT = 20;
 const HELP_TEXT = [
   "<b>Here Bot</b>",
   "",
@@ -41,11 +42,14 @@ const HELP_TEXT = [
   "- Use /here inside a group to mention every tracked member.",
   "- Use /tagset, /tagadd, /tagremove, /tag and /tags for smaller groups.",
   "- Use /manage for buttons to browse members and build subgroups.",
-  `- Use inline mode as @${env.BOT_USERNAME} all &lt;workspace-key&gt; or @${env.BOT_USERNAME} tag &lt;workspace-key&gt; &lt;group&gt;.`,
+  `- Use inline mode as @${env.BOT_USERNAME}, @${env.BOT_USERNAME} all, or @${env.BOT_USERNAME} &lt;group&gt;.`,
+  "- If you are tracked in one group, the bot uses it automatically.",
+  "- If you are tracked in multiple groups, Telegram shows one result per group so you can tap the right one.",
+  `- The old explicit syntax still works: @${env.BOT_USERNAME} all &lt;workspace-key&gt; or @${env.BOT_USERNAME} tag &lt;workspace-key&gt; &lt;group&gt;.`,
   "",
   "Important Telegram limits:",
   "- Telegram does not support a literal Slack-style @here trigger for bots.",
-  "- Inline queries do not include the target chat ID, so inline mode needs a workspace key.",
+  "- Inline queries do not include the target chat ID, so the bot auto-matches your tracked groups and only needs a workspace key for explicit targeting.",
   "- Bots cannot list every member of a broadcast channel. This bot supports groups/supergroups only.",
 ].join("\n");
 
@@ -227,6 +231,68 @@ function buildInlineResult(
   };
 }
 
+function buildInlineEveryoneResult(chat: KnownChat): InlineQueryShape | null {
+  const members = store.getMembers(chat.id);
+
+  if (members.length === 0) {
+    return null;
+  }
+
+  const chunks = buildMentionChunks("here", members);
+  const firstChunk = chunks[0];
+
+  if (!firstChunk || chunks.length > 1) {
+    return null;
+  }
+
+  return buildInlineResult(
+    `Ping everyone in ${chat.title}`,
+    `${members.length} tracked members`,
+    firstChunk,
+  );
+}
+
+function buildInlineTagResult(chat: KnownChat, groupKey: string): InlineQueryShape | null {
+  const members = store.getGroupMembers(chat.id, groupKey);
+
+  if (members.length === 0) {
+    return null;
+  }
+
+  const chunks = buildMentionChunks(groupKey, members);
+  const firstChunk = chunks[0];
+
+  if (!firstChunk || chunks.length > 1) {
+    return null;
+  }
+
+  return buildInlineResult(
+    `Ping @${groupKey} in ${chat.title}`,
+    `${members.length} tracked members`,
+    firstChunk,
+  );
+}
+
+function buildMembershipScopedAllResults(userId: number): InlineQueryShape[] {
+  return store
+    .listChatsForMember(userId)
+    .map((chat) => buildInlineEveryoneResult(chat))
+    .filter((result): result is InlineQueryShape => Boolean(result))
+    .slice(0, INLINE_RESULT_LIMIT);
+}
+
+function buildMembershipScopedTagResults(
+  userId: number,
+  groupKey: string,
+): InlineQueryShape[] {
+  return store
+    .listChatsForMember(userId)
+    .filter((chat) => Boolean(store.getGroup(chat.id, groupKey)))
+    .map((chat) => buildInlineTagResult(chat, groupKey))
+    .filter((result): result is InlineQueryShape => Boolean(result))
+    .slice(0, INLINE_RESULT_LIMIT);
+}
+
 async function registerCommands(): Promise<void> {
   await bot.api.setMyCommands([
     { command: "start", description: "Show setup help" },
@@ -273,8 +339,9 @@ bot.command("bind", async (ctx) => {
       `Tracked members: <b>${store.getMembers(chat.id).length}</b>`,
       `Custom groups: <b>${groupCount}</b>`,
       "",
-      `Inline usage: <code>@${env.BOT_USERNAME} all ${registered.workspaceKey}</code>`,
-      `Inline custom group: <code>@${env.BOT_USERNAME} tag ${registered.workspaceKey} gang</code>`,
+      `Inline usage: <code>@${env.BOT_USERNAME}</code> or <code>@${env.BOT_USERNAME} all</code>`,
+      `Inline subgroup: <code>@${env.BOT_USERNAME} gang</code>`,
+      `Explicit fallback: <code>@${env.BOT_USERNAME} all ${registered.workspaceKey}</code>`,
     ].join("\n"),
     {
       parse_mode: "HTML",
@@ -662,166 +729,209 @@ bot.on("my_chat_member", async (ctx) => {
 
 bot.on("inline_query", async (ctx) => {
   const query = ctx.inlineQuery.query.trim();
-
-  if (!query) {
-    await ctx.answerInlineQuery([buildInlineHelpResult()], {
-      cache_time: 0,
-      is_personal: true,
-    });
-    return;
-  }
-
-  const [rawAction = "", workspaceKey, tagKey] = query.split(/\s+/);
+  const tokens = query ? query.split(/\s+/).filter(Boolean) : [];
+  const [rawAction = ""] = tokens;
   const normalizedAction = rawAction.toLowerCase();
+  const userId = ctx.from.id;
+  const memberChats = store.listChatsForMember(userId);
 
-  if (!workspaceKey) {
-    await ctx.answerInlineQuery([buildInlineHelpResult()], {
+  async function answer(results: InlineQueryShape[]): Promise<void> {
+    await ctx.answerInlineQuery(results, {
       cache_time: 0,
       is_personal: true,
     });
-    return;
   }
 
-  const chat = store.getChatByWorkspaceKey(workspaceKey);
-
-  if (!chat) {
-    await ctx.answerInlineQuery(
-      [
-        buildInlineResult(
-          "Unknown workspace",
-          `No group registered as ${workspaceKey}`,
-          `I could not find the workspace key "${workspaceKey}". Run /bind in the target group first.`,
-        ),
-      ],
-      { cache_time: 0, is_personal: true },
+  function noTrackedGroupsResult(): InlineQueryShape {
+    return buildInlineResult(
+      "No tracked groups yet",
+      "I do not know any groups for you yet",
+      "I can only auto-select groups where I have already seen you. Send one message in the target group after the bot joins, then try inline mode again.",
     );
-    return;
   }
 
-  if (normalizedAction === "all" || normalizedAction === "here") {
-    const members = store.getMembers(chat.id);
-
-    if (members.length === 0) {
-      await ctx.answerInlineQuery(
-        [
-          buildInlineResult(
-            "No tracked members",
-            "The target group has no tracked users yet",
-            buildMissingMembersHint(),
-          ),
-        ],
-        { cache_time: 0, is_personal: true },
-      );
-      return;
-    }
-
-    const chunks = buildMentionChunks("here", members);
-    const firstChunk = chunks[0];
-
-    if (!firstChunk) {
-      await ctx.answerInlineQuery([buildInlineHelpResult()], {
-        cache_time: 0,
-        is_personal: true,
-      });
-      return;
-    }
-
-    if (chunks.length > 1) {
-      await ctx.answerInlineQuery(
-        [
-          buildInlineResult(
-            "Too many members for inline mode",
-            "Use /here in the group for large teams",
-            "This mention set is too large for a single inline message. Use /here inside the target group instead.",
-          ),
-        ],
-        { cache_time: 0, is_personal: true },
-      );
-      return;
-    }
-
-    await ctx.answerInlineQuery(
-      [
-        buildInlineResult(
-          `Ping everyone in ${chat.title}`,
-          `${members.length} tracked members`,
-          firstChunk,
-        ),
-      ],
-      { cache_time: 0, is_personal: true },
+  function noInlineReadyGroupsResult(): InlineQueryShape {
+    return buildInlineResult(
+      "No inline-ready groups",
+      "Use /here or /tag inside the group",
+      "I found your tracked groups, but they are either empty or too large for a single inline message. Use /here or /tag inside the target group instead.",
     );
+  }
+
+  if (tokens.length === 0 || normalizedAction === "all" || normalizedAction === "here") {
+    if (tokens.length >= 2) {
+      const workspaceKey = tokens[1] ?? "";
+      const chat = store.getChatByWorkspaceKey(workspaceKey);
+
+      if (!chat) {
+        await answer([
+          buildInlineResult(
+            "Unknown workspace",
+            `No group registered as ${workspaceKey}`,
+            `I could not find the workspace key "${workspaceKey}". Run /bind in the target group first.`,
+          ),
+        ]);
+        return;
+      }
+
+      const result = buildInlineEveryoneResult(chat);
+
+      if (result) {
+        await answer([result]);
+        return;
+      }
+
+      const members = store.getMembers(chat.id);
+
+      await answer([
+        buildInlineResult(
+          members.length === 0 ? "No tracked members" : "Too many members for inline mode",
+          members.length === 0
+            ? "The target group has no tracked users yet"
+            : "Use /here in the group for large teams",
+          members.length === 0
+            ? buildMissingMembersHint()
+            : "This mention set is too large for a single inline message. Use /here inside the target group instead.",
+        ),
+      ]);
+      return;
+    }
+
+    const results = buildMembershipScopedAllResults(userId);
+
+    if (results.length > 0) {
+      await answer(results);
+      return;
+    }
+
+    await answer([
+      memberChats.length === 0 ? noTrackedGroupsResult() : noInlineReadyGroupsResult(),
+    ]);
     return;
   }
 
   if (normalizedAction === "tag" || normalizedAction === "group") {
-    const normalizedTag = tagKey ? normalizeKey(tagKey) : null;
+    if (tokens.length >= 3) {
+      const workspaceKey = tokens[1] ?? "";
+      const chat = store.getChatByWorkspaceKey(workspaceKey);
+
+      if (!chat) {
+        await answer([
+          buildInlineResult(
+            "Unknown workspace",
+            `No group registered as ${workspaceKey}`,
+            `I could not find the workspace key "${workspaceKey}". Run /bind in the target group first.`,
+          ),
+        ]);
+        return;
+      }
+
+      const normalizedTag = normalizeKey(tokens[2] ?? "");
+
+      if (!normalizedTag) {
+        await answer([buildInlineHelpResult()]);
+        return;
+      }
+
+      const result = buildInlineTagResult(chat, normalizedTag);
+
+      if (result) {
+        await answer([result]);
+        return;
+      }
+
+      const members = store.getGroupMembers(chat.id, normalizedTag);
+
+      await answer([
+        buildInlineResult(
+          members.length === 0 ? "Unknown or empty group" : "Too many members for inline mode",
+          members.length === 0
+            ? `No members stored for @${normalizedTag}`
+            : "Use /tag inside the group for large custom groups",
+          members.length === 0
+            ? `I could not find a non-empty custom group named @${normalizedTag} in ${chat.title}.`
+            : `@${normalizedTag} is too large for a single inline message. Use /tag ${normalizedTag} inside the group instead.`,
+        ),
+      ]);
+      return;
+    }
+
+    const normalizedTag = normalizeKey(tokens[1] ?? "");
 
     if (!normalizedTag) {
-      await ctx.answerInlineQuery([buildInlineHelpResult()], {
-        cache_time: 0,
-        is_personal: true,
-      });
+      await answer([buildInlineHelpResult()]);
       return;
     }
 
-    const members = store.getGroupMembers(chat.id, normalizedTag);
+    const results = buildMembershipScopedTagResults(userId, normalizedTag);
 
-    if (members.length === 0) {
-      await ctx.answerInlineQuery(
-        [
-          buildInlineResult(
-            "Unknown or empty group",
-            `No members stored for @${normalizedTag}`,
-            `I could not find a non-empty custom group named @${normalizedTag} in ${chat.title}.`,
-          ),
-        ],
-        { cache_time: 0, is_personal: true },
-      );
+    if (results.length > 0) {
+      await answer(results);
       return;
     }
 
-    const chunks = buildMentionChunks(normalizedTag, members);
-    const firstChunk = chunks[0];
-
-    if (!firstChunk) {
-      await ctx.answerInlineQuery([buildInlineHelpResult()], {
-        cache_time: 0,
-        is_personal: true,
-      });
+    if (memberChats.length === 0) {
+      await answer([noTrackedGroupsResult()]);
       return;
     }
 
-    if (chunks.length > 1) {
-      await ctx.answerInlineQuery(
-        [
-          buildInlineResult(
-            "Too many members for inline mode",
-            "Use /tag inside the group for large custom groups",
-            `@${normalizedTag} is too large for a single inline message. Use /tag ${normalizedTag} inside the group instead.`,
-          ),
-        ],
-        { cache_time: 0, is_personal: true },
-      );
-      return;
-    }
-
-    await ctx.answerInlineQuery(
-      [
-        buildInlineResult(
-          `Ping @${normalizedTag} in ${chat.title}`,
-          `${members.length} tracked members`,
-          firstChunk,
-        ),
-      ],
-      { cache_time: 0, is_personal: true },
+    const matchingChats = memberChats.filter((chat) =>
+      Boolean(store.getGroup(chat.id, normalizedTag)),
     );
+
+    await answer([
+      buildInlineResult(
+        matchingChats.length === 0 ? "Unknown subgroup" : "Subgroup not inline-ready",
+        matchingChats.length === 0
+          ? `I could not find @${normalizedTag} in your tracked groups`
+          : "Use /tag inside the group instead",
+        matchingChats.length === 0
+          ? `I could not find a subgroup named @${normalizedTag} in the groups where I know you.`
+          : `I found @${normalizedTag}, but it is empty or too large for a single inline message. Use /tag ${normalizedTag} inside the target group instead.`,
+      ),
+    ]);
     return;
   }
 
-  await ctx.answerInlineQuery([buildInlineHelpResult()], {
-    cache_time: 0,
-    is_personal: true,
-  });
+  if (tokens.length === 1) {
+    const normalizedTag = normalizeKey(tokens[0] ?? "");
+
+    if (!normalizedTag) {
+      await answer([buildInlineHelpResult()]);
+      return;
+    }
+
+    const results = buildMembershipScopedTagResults(userId, normalizedTag);
+
+    if (results.length > 0) {
+      await answer(results);
+      return;
+    }
+
+    if (memberChats.length === 0) {
+      await answer([noTrackedGroupsResult()]);
+      return;
+    }
+
+    const matchingChats = memberChats.filter((chat) =>
+      Boolean(store.getGroup(chat.id, normalizedTag)),
+    );
+
+    await answer([
+      buildInlineResult(
+        matchingChats.length === 0 ? "Unknown subgroup" : "Subgroup not inline-ready",
+        matchingChats.length === 0
+          ? `I could not find @${normalizedTag} in your tracked groups`
+          : "Use /tag inside the group instead",
+        matchingChats.length === 0
+          ? `I could not find a subgroup named @${normalizedTag} in the groups where I know you.`
+          : `I found @${normalizedTag}, but it is empty or too large for a single inline message. Use /tag ${normalizedTag} inside the target group instead.`,
+      ),
+    ]);
+    return;
+  }
+
+  await answer([buildInlineHelpResult()]);
 });
 
 bot.on("callback_query:data", async (ctx) => {

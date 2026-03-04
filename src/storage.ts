@@ -139,6 +139,18 @@ export class JsonStore {
     return null;
   }
 
+  listChats(): KnownChat[] {
+    return Object.values(this.data.chats).sort((left, right) =>
+      left.title.localeCompare(right.title),
+    );
+  }
+
+  listChatsForMember(userId: number): KnownChat[] {
+    const key = String(userId);
+
+    return this.listChats().filter((chat) => Boolean(chat.members[key]));
+  }
+
   getMembers(chatId: number): KnownMember[] {
     const chat = this.getChat(chatId);
 

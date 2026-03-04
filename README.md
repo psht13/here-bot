@@ -5,7 +5,11 @@ Telegram does not allow bots to implement a literal Slack-style `@here` trigger,
 - `/here` inside a group or supergroup mentions every tracked member.
 - Custom mention groups such as `@gang` are managed with bot commands, then triggered with `/tag gang`.
 - `/manage` opens a button-based dashboard for browsing members, opening subgroups, and building subgroup drafts.
-- Inline mode works too, but it needs an explicit workspace key:
+- Inline mode auto-resolves from your tracked groups:
+  - `@YourBot`
+  - `@YourBot all`
+  - `@YourBot gang`
+- The explicit workspace syntax still works when you want to target a specific group manually:
   - `@YourBot all <workspace-key>`
   - `@YourBot tag <workspace-key> <group-name>`
 
@@ -16,13 +20,13 @@ The bot stores only the members it has actually seen. Telegram bots cannot fetch
 - Group and supergroup chats only.
 - Mentioning tracked users with HTML `tg://user?id=...` links.
 - Custom reusable mention groups.
-- Inline query results for known workspaces.
+- Member-aware inline query results, with optional explicit workspace targeting.
 - Persistent local JSON storage.
 
 ## What Telegram does not allow
 
 - No bot can register a real `@here` keyword that triggers automatically while you type.
-- Inline queries do not include the current chat ID, so a workspace key is required.
+- Inline queries do not include the current chat ID, so the bot can only infer from your tracked groups unless you use explicit workspace syntax.
 - Bots cannot enumerate all subscribers of a broadcast channel.
 - Users who never interacted after the bot joined cannot be auto-mentioned until the bot sees them.
 
@@ -73,7 +77,7 @@ npm start
 3. Run `/bind` in the group.
 4. Ask each person you want to mention to send at least one message after the bot joins.
 
-After `/bind`, the bot returns a workspace key, for example `my-team-a1b2`. That key is what inline mode uses because Telegram does not provide the target chat ID in inline queries.
+After `/bind`, the bot returns a workspace key, for example `my-team-a1b2`. You usually do not need to type it anymore. It remains available as an explicit fallback when you want to target a specific group manually.
 
 ## Usage
 
@@ -94,12 +98,26 @@ Button dashboard:
 The dashboard lets you:
 
 - tap `Ping All` instead of typing `/here`
-- tap `Inline Here` to inject the full inline query for the current group
+- tap `Inline Here` to inject the inline query without typing anything extra
 - browse tracked members
 - open existing subgroups
 - build a subgroup by tapping members
 
 Inline mode in any chat input:
+
+```text
+@YourBot
+```
+
+Or:
+
+```text
+@YourBot all
+```
+
+If the bot knows you in only one tracked group, it returns that group directly. If it knows you in multiple tracked groups, Telegram shows one result per group and you tap the correct one.
+
+Explicit fallback syntax still works:
 
 ```text
 @YourBot all my-team-a1b2
@@ -170,6 +188,14 @@ Delete a group:
 ```
 
 Inline mode for a custom group:
+
+```text
+@YourBot gang
+```
+
+If the same subgroup name exists in multiple groups, Telegram shows one result per group and you tap the right one.
+
+Explicit fallback:
 
 ```text
 @YourBot tag my-team-a1b2 gang

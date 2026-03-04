@@ -367,7 +367,7 @@ export function buildHomeScreen(
 ): ManagerScreen {
   const keyboard = new InlineKeyboard()
     .text("Ping All", managerCallbacks.pingAll(chat.id))
-    .switchInlineCurrent("Inline Here", `all ${chat.workspaceKey}`)
+    .switchInlineCurrent("Inline Here", "all")
     .row()
     .text("Groups", managerCallbacks.groups(chat.id, 0))
     .text("Members", managerCallbacks.members(chat.id, 0))
@@ -479,7 +479,7 @@ export function buildGroupScreen(
 ): ManagerScreen {
   const keyboard = new InlineKeyboard()
     .text(`Ping @${shorten(group.key, 14)}`, managerCallbacks.groupPing(chat.id, group.key))
-    .switchInlineCurrent("Inline", `tag ${chat.workspaceKey} ${group.key}`)
+    .switchInlineCurrent("Inline", `tag ${group.key}`)
     .row()
     .text("Edit Members", managerCallbacks.draftEdit(chat.id, group.key, originPage))
     .text("Delete", managerCallbacks.groupDelete(chat.id, group.key, originPage))
