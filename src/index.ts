@@ -19,6 +19,10 @@ import {
   type ManagerScreen,
 } from "./manager.js";
 import type { KnownChat, KnownMember } from "./models.js";
+import {
+  formatPingCooldownMessage,
+  PingCooldownRegistry,
+} from "./ping-cooldown.js";
 import { JsonStore } from "./storage.js";
 
 const envSchema = z.object({
@@ -33,6 +37,7 @@ const envSchema = z.object({
 const env = envSchema.parse(process.env);
 const store = new JsonStore(env.DATA_FILE);
 const drafts = new DraftRegistry();
+const pingCooldowns = new PingCooldownRegistry();
 const bot = new Bot(env.BOT_TOKEN);
 const INLINE_RESULT_LIMIT = 20;
 const HELP_TEXT = [
@@ -179,12 +184,36 @@ function getHomeScreen(chatId: number): ManagerScreen | null {
   );
 }
 
-function getDraftOwnerId(ctx: Context): number | null {
+function getHumanUserId(ctx: Context): number | null {
   if (!ctx.from || ctx.from.is_bot) {
     return null;
   }
 
   return ctx.from.id;
+}
+
+function getDraftOwnerId(ctx: Context): number | null {
+  return getHumanUserId(ctx);
+}
+
+function claimPingCooldown(ctx: Context, label: string): string | null {
+  if (!isSupportedGroupChat(ctx.chat)) {
+    return null;
+  }
+
+  const userId = getHumanUserId(ctx);
+
+  if (!userId) {
+    return null;
+  }
+
+  const remainingMs = pingCooldowns.reserve(ctx.chat.id, userId, label);
+
+  if (remainingMs <= 0) {
+    return null;
+  }
+
+  return formatPingCooldownMessage(remainingMs);
 }
 
 async function saveDraftAsGroup(
@@ -266,15 +295,17 @@ function resolveSelectedMembers(ctx: Context, chatId: number, refs: string[]) {
 }
 
 bot.use(async (ctx, next) => {
-  if (isSupportedGroupChat(ctx.chat) && ctx.msg) {
+  const message = ctx.message;
+
+  if (isSupportedGroupChat(ctx.chat) && message) {
     await store.ensureChat(ctx.chat);
 
     if (ctx.from && !ctx.from.is_bot) {
       await store.upsertMember(ctx.chat, ctx.from);
 
       const draft = drafts.get(ctx.chat.id, ctx.from.id);
-      const messageText = "text" in ctx.msg && typeof ctx.msg.text === "string"
-        ? ctx.msg.text.trim()
+      const messageText = typeof message.text === "string"
+        ? message.text.trim()
         : "";
 
       if (draft?.awaitingName && messageText && !messageText.startsWith("/")) {
@@ -283,13 +314,13 @@ bot.use(async (ctx, next) => {
       }
     }
 
-    const replyAuthor = ctx.msg.reply_to_message?.from;
+    const replyAuthor = message.reply_to_message?.from;
 
     if (replyAuthor && !replyAuthor.is_bot) {
       await store.upsertMember(ctx.chat, replyAuthor);
     }
 
-    const newMembers = ctx.msg.new_chat_members ?? [];
+    const newMembers = message.new_chat_members ?? [];
 
     for (const member of newMembers) {
       await store.upsertMember(ctx.chat, member);
@@ -500,7 +531,18 @@ bot.command("here", async (ctx) => {
   }
 
   await store.ensureChat(chat);
-  await sendMentionSequence(ctx, "here", store.getMembers(chat.id));
+  const members = store.getMembers(chat.id);
+
+  if (members.length > 0) {
+    const cooldownMessage = claimPingCooldown(ctx, "here");
+
+    if (cooldownMessage) {
+      await ctx.reply(cooldownMessage);
+      return;
+    }
+  }
+
+  await sendMentionSequence(ctx, "here", members);
 });
 
 bot.command("tags", async (ctx) => {
@@ -545,6 +587,13 @@ bot.command("tag", async (ctx) => {
     await ctx.reply(
       "That group is empty or does not exist. Create it with /tagset first.",
     );
+    return;
+  }
+
+  const cooldownMessage = claimPingCooldown(ctx, normalizedTag);
+
+  if (cooldownMessage) {
+    await ctx.reply(cooldownMessage);
     return;
   }
 
@@ -1013,8 +1062,22 @@ bot.on("callback_query:data", async (ctx) => {
   }
 
   if (action.kind === "pingAll") {
+    const members = store.getMembers(action.chatId);
+
+    if (members.length > 0) {
+      const cooldownMessage = claimPingCooldown(ctx, "here");
+
+      if (cooldownMessage) {
+        await ctx.answerCallbackQuery({
+          text: cooldownMessage,
+          show_alert: true,
+        });
+        return;
+      }
+    }
+
     await ctx.answerCallbackQuery();
-    await sendMentionSequence(ctx, "here", store.getMembers(action.chatId));
+    await sendMentionSequence(ctx, "here", members);
     return;
   }
 
@@ -1070,6 +1133,16 @@ bot.on("callback_query:data", async (ctx) => {
     if (members.length === 0) {
       await ctx.answerCallbackQuery({
         text: "That subgroup is empty.",
+        show_alert: true,
+      });
+      return;
+    }
+
+    const cooldownMessage = claimPingCooldown(ctx, action.groupKey);
+
+    if (cooldownMessage) {
+      await ctx.answerCallbackQuery({
+        text: cooldownMessage,
         show_alert: true,
       });
       return;
