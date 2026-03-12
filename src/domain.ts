@@ -2,6 +2,10 @@ import type { KnownMember } from "./models.js";
 
 const MAX_MESSAGE_LENGTH = 3900;
 
+export type PingRequest =
+  | { kind: "all" }
+  | { kind: "group"; groupKey: string };
+
 export function normalizeKey(raw: string): string | null {
   const value = raw.trim().toLowerCase();
 
@@ -79,6 +83,53 @@ export function buildMentionChunks(label: string, members: KnownMember[]): strin
   chunks.push(current);
 
   return chunks;
+}
+
+export function parsePingRequest(raw: string): PingRequest | null {
+  const tokens = raw.trim().split(/\s+/).filter(Boolean);
+
+  if (tokens.length !== 1) {
+    return null;
+  }
+
+  const token = tokens[0];
+
+  if (!token) {
+    return null;
+  }
+
+  const normalizedToken = token.toLowerCase();
+
+  if (normalizedToken === "all") {
+    return { kind: "all" };
+  }
+
+  const normalizedGroup = normalizeKey(
+    token.startsWith("@") ? token.slice(1) : token,
+  );
+
+  if (!normalizedGroup) {
+    return null;
+  }
+
+  return { kind: "group", groupKey: normalizedGroup };
+}
+
+export function parseMentionPingRequest(
+  raw: string,
+  botUsername: string,
+): PingRequest | null {
+  const tokens = raw.trim().split(/\s+/).filter(Boolean);
+
+  if (tokens.length < 2) {
+    return null;
+  }
+
+  if (tokens[0]?.toLowerCase() !== `@${botUsername.toLowerCase()}`) {
+    return null;
+  }
+
+  return parsePingRequest(tokens.slice(1).join(" "));
 }
 
 export function resolveMemberRefs(

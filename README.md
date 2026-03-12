@@ -1,17 +1,13 @@
 # Here Bot
 
-Telegram does not allow bots to implement a literal Slack-style `@here` trigger, and inline queries do not reveal the exact chat where the user is typing. This project implements the closest reliable Telegram-native version:
+Telegram does not allow bots to implement a literal Slack-style `@here` trigger, and inline queries do not reveal the exact chat where the user is typing. This project focuses on the group-native flow that works cleanly in practice:
 
 - `/here` inside a group or supergroup mentions every tracked member.
 - Custom mention groups such as `@gang` are managed with bot commands, then triggered with `/tag gang`.
 - `/manage` opens a button-based dashboard for browsing members, opening subgroups, and building subgroup drafts.
-- Inline mode auto-resolves from your tracked groups:
-  - `@YourBot`
+- The bot also accepts short ping queries:
   - `@YourBot all`
   - `@YourBot gang`
-- The explicit workspace syntax still works when you want to target a specific group manually:
-  - `@YourBot all <workspace-key>`
-  - `@YourBot tag <workspace-key> <group-name>`
 
 The bot stores only the members it has actually seen. Telegram bots cannot fetch a full member list for a group or channel on demand.
 
@@ -20,13 +16,13 @@ The bot stores only the members it has actually seen. Telegram bots cannot fetch
 - Group and supergroup chats only.
 - Mentioning tracked users with HTML `tg://user?id=...` links.
 - Custom reusable mention groups.
-- Member-aware inline query results, with optional explicit workspace targeting.
+- Member-aware pinging from commands, manager buttons, and `@YourBot ...` queries.
 - Persistent local JSON storage.
 
 ## What Telegram does not allow
 
 - No bot can register a real `@here` keyword that triggers automatically while you type.
-- Inline queries do not include the current chat ID, so the bot can only infer from your tracked groups unless you use explicit workspace syntax.
+- Inline queries do not include the exact target chat ID, so the bot prefers the current group context and otherwise falls back to your most recent tracked group.
 - Bots cannot enumerate all subscribers of a broadcast channel.
 - Users who never interacted after the bot joined cannot be auto-mentioned until the bot sees them.
 
@@ -77,7 +73,7 @@ npm start
 3. Run `/bind` in the group.
 4. Ask each person you want to mention to send at least one message after the bot joins.
 
-After `/bind`, the bot returns a workspace key, for example `my-team-a1b2`. You usually do not need to type it anymore. It remains available as an explicit fallback when you want to target a specific group manually.
+After `/bind`, the bot is ready to respond inside that group as soon as it has seen the members you want to mention.
 
 ## Usage
 
@@ -98,30 +94,18 @@ Button dashboard:
 The dashboard lets you:
 
 - tap `Ping All` instead of typing `/here`
-- tap `Inline Here` to inject the inline query without typing anything extra
+- tap `Inline Here` to inject the same `all` query into the current chat
 - browse tracked members
 - open existing subgroups
 - build a subgroup by tapping members
 
-Inline mode in any chat input:
-
-```text
-@YourBot
-```
-
-Or:
+Composer query in the target group:
 
 ```text
 @YourBot all
 ```
 
-If the bot knows you in only one tracked group, it returns that group directly. If it knows you in multiple tracked groups, Telegram shows one result per group and you tap the correct one.
-
-Explicit fallback syntax still works:
-
-```text
-@YourBot all my-team-a1b2
-```
+The bot resolves the target group from the current group context when it can, and otherwise falls back to your most recent tracked group.
 
 ### Create a smaller custom group
 
@@ -193,25 +177,16 @@ Delete a group:
 /tagdelete gang
 ```
 
-Inline mode for a custom group:
+Composer query for a custom group:
 
 ```text
 @YourBot gang
-```
-
-If the same subgroup name exists in multiple groups, Telegram shows one result per group and you tap the right one.
-
-Explicit fallback:
-
-```text
-@YourBot tag my-team-a1b2 gang
 ```
 
 ## Data model
 
 The bot stores:
 
-- A workspace key for each Telegram group.
 - Known members that the bot has observed.
 - Custom mention groups and their member IDs.
 

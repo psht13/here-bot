@@ -151,6 +151,17 @@ export class JsonStore {
     return this.listChats().filter((chat) => Boolean(chat.members[key]));
   }
 
+  listChatsForMemberByRecency(userId: number): KnownChat[] {
+    const key = String(userId);
+
+    return this.listChatsForMember(userId).sort((left, right) => {
+      const leftSeenAt = left.members[key]?.lastSeenAt ?? "";
+      const rightSeenAt = right.members[key]?.lastSeenAt ?? "";
+
+      return rightSeenAt.localeCompare(leftSeenAt);
+    });
+  }
+
   getMembers(chatId: number): KnownMember[] {
     const chat = this.getChat(chatId);
 

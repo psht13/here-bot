@@ -393,11 +393,10 @@ export function buildHomeScreen(
   return {
     text: [
       `<b>${escapeHtml(chat.title)}</b>`,
-      `Workspace key: <code>${chat.workspaceKey}</code>`,
       `Tracked members: <b>${memberCount}</b>`,
       `Custom groups: <b>${groupCount}</b>`,
       "",
-      "Use the buttons below to browse members, manage subgroups, or inject the inline query without typing the workspace key manually.",
+      "Use the buttons below to ping everyone, browse members, and manage subgroups.",
     ].join("\n"),
     keyboard,
   };
@@ -495,7 +494,7 @@ export function buildGroupScreen(
 ): ManagerScreen {
   const keyboard = new InlineKeyboard()
     .text(`Ping @${shorten(group.key, 14)}`, managerCallbacks.groupPing(chat.id, group.key))
-    .switchInlineCurrent("Inline", `tag ${group.key}`)
+    .switchInlineCurrent("Inline", group.key)
     .row()
     .text("Edit Members", managerCallbacks.draftEdit(chat.id, group.key, originPage))
     .text("Delete", managerCallbacks.groupDelete(chat.id, group.key, originPage))

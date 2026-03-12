@@ -4,6 +4,8 @@ import assert from "node:assert/strict";
 import {
   buildMentionChunks,
   normalizeKey,
+  parseMentionPingRequest,
+  parsePingRequest,
   resolveMemberRefs,
 } from "./domain.js";
 import type { KnownMember } from "./models.js";
@@ -47,4 +49,31 @@ test("buildMentionChunks keeps the heading and emits at least one chunk", () => 
   assert.match(firstChunk, /^@here /);
   assert.match(firstChunk, /tg:\/\/user\?id=101/);
   assert.match(firstChunk, /tg:\/\/user\?id=202/);
+});
+
+test("parsePingRequest accepts only all or a subgroup name", () => {
+  assert.deepEqual(parsePingRequest("all"), { kind: "all" });
+  assert.deepEqual(parsePingRequest("Gang-1"), {
+    kind: "group",
+    groupKey: "gang-1",
+  });
+  assert.deepEqual(parsePingRequest("@Gang_1"), {
+    kind: "group",
+    groupKey: "gang_1",
+  });
+  assert.equal(parsePingRequest("tag gang"), null);
+  assert.equal(parsePingRequest(""), null);
+});
+
+test("parseMentionPingRequest requires a direct bot mention prefix", () => {
+  assert.deepEqual(parseMentionPingRequest("@HereBot all", "hereBot"), {
+    kind: "all",
+  });
+  assert.deepEqual(parseMentionPingRequest("@herebot ops-team", "hereBot"), {
+    kind: "group",
+    groupKey: "ops-team",
+  });
+  assert.equal(parseMentionPingRequest("@someoneelse all", "hereBot"), null);
+  assert.equal(parseMentionPingRequest("@herebot", "hereBot"), null);
+  assert.equal(parseMentionPingRequest("@herebot all now", "hereBot"), null);
 });
