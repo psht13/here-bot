@@ -8,14 +8,8 @@ import {
   buildHomeScreen,
   buildMembersScreen,
 } from "./adapters/telegram/presenters/manager-screens.js";
-import {
-  managerCallbacks,
-  parseManagerAction,
-} from "./application/callbacks/manager-callbacks.js";
-import {
-  DraftRegistry,
-  type DraftState,
-} from "./application/services/draft-registry.js";
+import { managerCallbacks, parseManagerAction } from "./application/callbacks/manager-callbacks.js";
+import { DraftRegistry, type DraftState } from "./application/services/draft-registry.js";
 import type { KnownChat, KnownMember, MentionGroup } from "./domain/models.js";
 
 function chat(overrides: Partial<KnownChat> = {}): KnownChat {

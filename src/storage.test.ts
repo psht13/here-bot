@@ -186,7 +186,10 @@ test("JsonStore init accepts unknown extra fields without changing known data", 
   assert.equal(storedChat?.title, "Alpha Chat");
   assert.equal((storedChat as unknown as Record<string, unknown> | null)?.chatExtra, "kept");
   assert.equal(storedMember?.displayName, "Alice Example");
-  assert.equal((storedMember as unknown as Record<string, unknown> | undefined)?.memberExtra, "kept");
+  assert.equal(
+    (storedMember as unknown as Record<string, unknown> | undefined)?.memberExtra,
+    "kept",
+  );
   assert.deepEqual(storedGroup?.memberIds, [101]);
   assert.equal((storedGroup as unknown as Record<string, unknown> | null)?.groupExtra, "kept");
 });

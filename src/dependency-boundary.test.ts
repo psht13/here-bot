@@ -84,9 +84,7 @@ function resolveRelativeImport(importer: string, specifier: string): string | nu
     return null;
   }
 
-  return path
-    .resolve(path.dirname(importer), specifier)
-    .replace(/\.(?:c|m)?js$/, ".ts");
+  return path.resolve(path.dirname(importer), specifier).replace(/\.(?:c|m)?js$/, ".ts");
 }
 
 function sourceRelativePath(filePath: string): string {
@@ -114,10 +112,7 @@ function getViolation(rule: BoundaryRule, importer: string, specifier: string): 
 
   const relativePath = sourceRelativePath(resolved);
 
-  if (
-    relativePath.startsWith("adapters/") ||
-    relativePath.startsWith("infrastructure/")
-  ) {
+  if (relativePath.startsWith("adapters/") || relativePath.startsWith("infrastructure/")) {
     return relativePath;
   }
 

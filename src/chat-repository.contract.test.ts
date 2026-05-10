@@ -21,12 +21,7 @@ interface RepositoryCase {
 const alphaChat: GroupChatInput = { id: -1001, type: "group", title: "Alpha Chat" };
 const betaChat: GroupChatInput = { id: -1002, type: "group", title: "Beta Chat" };
 
-function user(
-  id: number,
-  firstName: string,
-  lastName?: string,
-  username?: string,
-): UserInput {
+function user(id: number, firstName: string, lastName?: string, username?: string): UserInput {
   return {
     id,
     is_bot: false,
@@ -97,7 +92,10 @@ for (const repositoryCase of repositoryCases) {
     assert.equal(updated.title, "Renamed Chat");
     assert.equal(updated.workspaceKey, created.workspaceKey);
     assert.equal(repository.getChat(-1002)?.workspaceKey, created.workspaceKey);
-    assert.equal(repository.getChatByWorkspaceKey(` ${updated.workspaceKey.toUpperCase()} `)?.id, -1002);
+    assert.equal(
+      repository.getChatByWorkspaceKey(` ${updated.workspaceKey.toUpperCase()} `)?.id,
+      -1002,
+    );
     assert.equal(repository.getChatByWorkspaceKey("missing"), null);
 
     const defaultTitle = await repository.ensureChat({ id: -1003, type: "group" });
@@ -174,7 +172,10 @@ for (const repositoryCase of repositoryCases) {
     assert.deepEqual(repository.getGroupMembers(-9999, "ops"), []);
     assert.equal(await repository.upsertGroup(-9999, "ops", [101]), null);
     assert.equal(await repository.upsertGroup(alphaChat.id, "@ops", [101]), null);
-    assert.equal(await repository.upsertGroup(alphaChat.id, "Ops-Team", [202, 101, 101, 999]), "ops-team");
+    assert.equal(
+      await repository.upsertGroup(alphaChat.id, "Ops-Team", [202, 101, 101, 999]),
+      "ops-team",
+    );
     assert.deepEqual(repository.getGroup(alphaChat.id, "OPS-team")?.memberIds, [202, 101]);
     assert.deepEqual(
       repository.getGroupMembers(alphaChat.id, "ops-team").map((member) => member.id),
@@ -183,14 +184,20 @@ for (const repositoryCase of repositoryCases) {
 
     const createdAt = repository.getGroup(alphaChat.id, "ops-team")?.createdAt;
     await sleep(10);
-    assert.equal(await repository.addToGroup(alphaChat.id, "ops-team", [202, 303, 999]), "ops-team");
+    assert.equal(
+      await repository.addToGroup(alphaChat.id, "ops-team", [202, 303, 999]),
+      "ops-team",
+    );
     assert.deepEqual(repository.getGroup(alphaChat.id, "ops-team")?.memberIds, [202, 101, 303]);
     assert.equal(repository.getGroup(alphaChat.id, "ops-team")?.createdAt, createdAt);
 
     assert.equal(await repository.addToGroup(alphaChat.id, "new-group", [101]), "new-group");
     assert.equal(await repository.addToGroup(-9999, "new-group", [101]), null);
     assert.deepEqual(repository.getGroup(alphaChat.id, "new-group")?.memberIds, [101]);
-    assert.equal(await repository.removeFromGroup(alphaChat.id, "ops-team", [202, 999]), "ops-team");
+    assert.equal(
+      await repository.removeFromGroup(alphaChat.id, "ops-team", [202, 999]),
+      "ops-team",
+    );
     assert.deepEqual(repository.getGroup(alphaChat.id, "ops-team")?.memberIds, [101, 303]);
     assert.equal(await repository.removeFromGroup(alphaChat.id, "missing", [101]), null);
 

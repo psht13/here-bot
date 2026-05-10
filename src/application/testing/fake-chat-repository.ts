@@ -1,8 +1,4 @@
-import type {
-  ChatRepository,
-  GroupChatInput,
-  UserInput,
-} from "../ports/chat-repository.js";
+import type { ChatRepository, GroupChatInput, UserInput } from "../ports/chat-repository.js";
 import { generateWorkspaceKey, normalizeKey, userDisplayName } from "../../domain/index.js";
 import type { KnownChat, KnownMember, MentionGroup, PersistedData } from "../../domain/models.js";
 
@@ -173,11 +169,7 @@ export class FakeChatRepository implements ChatRepository {
     return this.upsertGroup(chatId, groupKey, merged);
   }
 
-  removeFromGroup(
-    chatId: number,
-    groupKey: string,
-    memberIds: number[],
-  ): Promise<string | null> {
+  removeFromGroup(chatId: number, groupKey: string, memberIds: number[]): Promise<string | null> {
     const current = this.getGroup(chatId, groupKey);
 
     if (!current) {
