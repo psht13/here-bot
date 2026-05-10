@@ -28,12 +28,14 @@ The bot stores only the members it has actually seen. Telegram bots cannot fetch
 
 ## Project layout
 
-- `src/index.ts`: bot entrypoint, commands, inline handlers.
-- `src/storage.ts`: JSON-backed persistence for groups, members, and custom tags.
-- `src/domain.ts`: parsing, mention formatting, and shared helpers.
-- `src/manager.ts`: button UI, callback parsing, and subgroup draft state.
-- `src/domain.test.ts`: small regression tests for the pure logic.
-- `src/manager.test.ts`: regression tests for callback parsing and subgroup drafts.
+- `src/main.ts`: composition root that loads config, wires dependencies, registers handlers, and starts the bot.
+- `src/config/`: environment parsing and validation.
+- `src/domain/`: framework-free models, parsing, key validation, member resolution, and mention chunk planning.
+- `src/application/`: Telegram-independent use cases, services, callbacks, presenters, ports, and test fakes.
+- `src/infrastructure/persistence/`: JSON-backed `ChatRepository` implementation and persisted-data validation.
+- `src/adapters/telegram/`: Grammy handlers, callback adapters, Telegram HTML presenters, and inline keyboard rendering.
+- `src/*.test.ts` and layer-local `*.test.ts`: characterization, contract, boundary, use-case, adapter, and presenter tests.
+- `docs/architecture.md`: layer responsibilities and dependency rules.
 
 ## Setup
 
@@ -64,6 +66,16 @@ npm run dev
 npm run build
 npm start
 ```
+
+## Testing and coverage
+
+```bash
+npm test
+npm run test:coverage
+npm run ci
+```
+
+`npm run ci` runs typecheck, lint, coverage-gated tests, and build.
 
 ## Add the bot to your Telegram group
 
