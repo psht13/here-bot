@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import {
   formatPingCooldownMessage,
   PingCooldownRegistry,
-} from "./ping-cooldown.js";
+} from "./application/services/ping-cooldown.js";
 
 test("PingCooldownRegistry enforces cooldowns per chat, user, and label", () => {
   const cooldowns = new PingCooldownRegistry();
@@ -18,11 +18,18 @@ test("PingCooldownRegistry enforces cooldowns per chat, user, and label", () => 
   assert.equal(cooldowns.reserve(-1001, 10, "here", start + 60_000), 0);
 });
 
+test("PingCooldownRegistry reserves by normalized label and expires at explicit now values", () => {
+  const cooldowns = new PingCooldownRegistry();
+  const start = 10_000;
+
+  assert.equal(cooldowns.reserve(-1001, 10, " Here ", start), 0);
+  assert.equal(cooldowns.reserve(-1001, 10, "here", start + 59_999), 1);
+  assert.equal(cooldowns.reserve(-1001, 10, "HERE", start + 60_000), 0);
+  assert.equal(cooldowns.reserve(-1001, 10, "here", start + 60_001), 59_999);
+});
+
 test("formatPingCooldownMessage renders short and minute-long waits", () => {
-  assert.equal(
-    formatPingCooldownMessage(5_100),
-    "Wait 6s before sending the same ping again.",
-  );
+  assert.equal(formatPingCooldownMessage(5_100), "Wait 6s before sending the same ping again.");
   assert.equal(
     formatPingCooldownMessage(60_000),
     "Wait 1 minute before sending the same ping again.",
